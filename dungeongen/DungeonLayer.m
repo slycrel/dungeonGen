@@ -1,0 +1,751 @@
+//
+//  HelloWorldLayer.m
+//  dungeongen
+//
+//  Created by Jeremy on 12/28/12.
+//  Copyright Jeremy 2012. All rights reserved.
+//
+
+
+// Import the interfaces
+#import "DungeonLayer.h"
+
+// Needed to obtain the Navigation Controller
+#import "AppDelegate.h"
+
+
+#pragma mark - HelloWorldLayer
+
+// HelloWorldLayer implementation
+@implementation DungeonLayer
+
+@synthesize width, height, mapData, map, corridorType, direction, roomDensity, roomMaxSize, roomMinSize, removeDeadEnds;
+
+// Helper class method that creates a Scene with the HelloWorldLayer as the only child.
++(CCScene *) scene
+{
+	// 'scene' is an autorelease object.
+	CCScene *scene = [CCScene node];
+	
+	// 'layer' is an autorelease object.
+	DungeonLayer *layer = [DungeonLayer node];
+	
+	// add layer as a child to scene
+	[scene addChild: layer];
+	
+	// return the scene
+	return scene;
+}
+
+// on "init" you need to initialize your instance
+-(id) init
+{
+	// always call "super" init
+	// Apple recommends to re-assign "self" with the "super's" return value
+	if( (self=[super init]) )
+	{
+		[self doStuff];
+	}
+	return self;
+}
+
+// on "dealloc" you need to release all your retained objects
+- (void) dealloc
+{
+	// in case you have something to dealloc, do it in this method
+	// in this particular example nothing needs to be released.
+	// cocos2d will automatically release all the children (Label)
+	
+	// don't forget to call "super dealloc"
+	[super dealloc];
+}
+
+#pragma mark -
+
+- (void) doStuff
+{
+	// import map settings
+	[self importSettings];
+	
+	// set up the data
+	[self setupMapData];
+	
+	// set up the map
+	[self addMap];
+}
+
+// alloc memory for our map data array.
+- (MapTileType*) newMapData
+{
+	MapTileType* data = malloc(sizeof(MapTileType) * self.width * self.height);
+
+	for (int x = 0; x < self.width; x++)
+		for (int y = 0; y < self.height; y++)
+			data[x + (y * self.height)] = wallbit;
+
+//	memset(data, zerobits, sizeof(MapTileType)* self.width * self.height);
+
+	return data;
+}
+
+
+#define kWidthKey			@"width"
+#define kHeightKey			@"height"
+#define kDirectionKey		@"direction"
+#define kRoomMinSizeKey		@"roomMinSize"
+#define kRoomMaxSizeKey		@"roomMaxSize"
+#define kRoomDensityKey		@"roomDensity"
+#define kCorridorType		@"corridorType"
+#define kRemoveDeadEnds		@"removeDeadEnds"
+
+static long seed = 1010414;
+
+
+// get the map settings for creation.
+- (void) importSettings
+{
+	// **NOTE: map size must be odd for walls to match properly.
+
+	// load defaults
+	NSUserDefaults* settings = [NSUserDefaults standardUserDefaults];
+	if ([settings integerForKey:kWidthKey] == 0)
+	{
+		// init defaults
+		[settings setInteger:127 forKey:kWidthKey];
+		[settings setInteger:127 forKey:kHeightKey];
+		[settings setInteger:1 forKey:kDirectionKey];
+		[settings setInteger:5 forKey:kRoomMinSizeKey];
+		[settings setInteger:50 forKey:kRoomMaxSizeKey];
+		[settings setInteger:averageRooms forKey:kRoomDensityKey];
+		[settings setInteger:bentType forKey:kCorridorType];
+		[settings setBool:YES forKey:kRemoveDeadEnds];
+		[settings synchronize];
+	}
+	else
+	{
+		// load saved values
+		self.width = [settings integerForKey:kWidthKey];
+		self.height = [settings integerForKey:kHeightKey];
+		self.direction = [settings integerForKey:kDirectionKey];
+		self.roomMaxSize = [settings integerForKey:kRoomMaxSizeKey];
+		self.roomMinSize = [settings integerForKey:kRoomMinSizeKey];
+		self.roomDensity = [settings integerForKey:kRoomDensityKey];
+		self.corridorType = [settings integerForKey:kCorridorType];
+		self.removeDeadEnds = [settings integerForKey:kRemoveDeadEnds];
+	}
+	
+//	self.width = 127;
+//	self.height = 127;
+//	self.direction = 1;
+//	self.roomMaxSize = self.width / 8;
+//	self.roomMinSize = 5;
+//	self.roomDensity = averageRooms;
+//	self.corridorType = randomType;
+//	self.removeDeadEnds = YES;
+
+	
+#warning add setting for allowing connecting dead ends to rooms or other corridors.
+
+#warning bug for room placement -- doesn't seem to bounds check correctly on the bottom/left for rooms?  min room size 3 at heavy weight doesn't fill like it should
+#warning bug with non-square maps!  has to do with corridor pathing looks like...
+#warning bug with dead end removal -- it doesn't work quite right.
+#warning bug with maps sized > 127.  Is this a cocos2d bug or TMXGenerator bug?
+	
+	mapData = [self newMapData];
+	
+	// random number generator
+	init_gen_rand(seed);
+	seed = randomNum();
+}
+
+
+- (void) addMap
+{
+	NSError* error = nil;
+	TMXGenerator* gen = [[TMXGenerator alloc] init];
+	gen.delegate = self;
+	
+	NSString* mapXML = [gen generateMapXML:&error];
+	if (mapXML)
+		map = [[[CCTMXTiledMap alloc] initWithXML:mapXML resourcePath:@"."] autorelease];
+	
+	if (!map)
+	{
+		NSLog(@"Error generating TMX Map!  Error: %@, %d\r\rXML:\r%@", [error localizedDescription], (int)[error code], mapXML);
+		return;
+	}
+	
+	[gen release], gen = nil;
+	
+	// add it as a child.
+	[self addChild:map z: -1 tag:100];
+	
+	// the pan/zoom controller
+	[_controller release];
+	_controller = [[CCPanZoomController controllerWithNode:map] retain];
+	long sz = MAX(map.contentSize.width, map.contentSize.height);
+	_controller.boundingRect = CGRectMake(0, 0, sz, sz);
+	_controller.zoomOutLimit = _controller.optimalZoomOutLimit;
+	_controller.zoomInLimit = 2.0f;
+	
+	[_controller enableWithTouchPriority:0 swallowsTouches:YES];
+}
+
+
+#pragma mark -
+#pragma mark BEGIN Interesting Stuff
+#pragma mark -
+
+
+// directional order, pseudo-random
+//
+- (void) reorder:(int*)order percent:(int)percent
+{
+	int temp;
+	if (percent < 50)
+	{
+		if (percent < 25)
+		{
+			temp = order[0];
+			order[0] = order[3];
+			order[3] = temp;
+		}
+		else
+		{
+			temp = order[1];
+			order[1] = order[3];
+			order[3] = temp;
+		}
+	}
+	else //if (percent < 50)
+	{
+		if (percent < 75)
+		{
+			temp = order[2];
+			order[2] = order[3];
+			order[3] = temp;
+		}
+		else
+		{
+			temp = order[0];
+			order[0] = order[2];
+			order[2] = temp;
+		}
+	}
+}
+
+
+// given an array of 4 ints, sets the directional order to traverse the maze.
+// attempts to honor the corridorType.
+//
+- (void) pseudoRandomOrder:(int*)order recurse:(BOOL)again
+{
+	int rnd = randomNum() % 100;							// we love percentages!
+
+	// stay straight or go random?
+	if ((self.corridorType == bentType && rnd >= 50) ||		// bent, keep the same starting direction 50% of the time
+		(self.corridorType == straightType && rnd >= 10))	// straight, keep the same starting direction 90% of the time
+	{
+		if (order[0] != self.direction)
+		{
+			int oldDir = order[0];
+			order[0] = self.direction;
+			for (int a = 1; a < 4; a++)
+			{
+				if (order[a] == order[0])
+				{
+					order[a] = oldDir;
+					break;
+				}
+			}
+		}
+	}
+	else	// random
+	{
+		[self reorder:order percent:rnd];
+
+		// do it again on a semi-random basis.  Again only applies when we are choosing randomly, for... better randomization.
+		if (again)
+		{
+			do
+			{
+				rnd = randomNum() % 100;
+				[self reorder:order percent:rnd];
+			} while (rnd % 2 != 0);
+		}
+	}
+}
+
+
+// step once through the maze.  Calls itself recursively.
+- (BOOL) iterateCellX:(int)x Y:(int)y
+{
+	BOOL retVal = NO;
+	int valids[4][4];
+	memset(valids, 0, 4*4);
+
+	int order[4] = {1, 2, 3, 4};
+	[self pseudoRandomOrder:order recurse:YES];
+		
+	for (int i = 0; i < 4; i++)
+	{
+		BOOL thisPassRetVal = NO;
+		int x1 = 0;
+		int x2 = 0;
+		int y1 = 0;
+		int y2 = 0;
+		
+		bool visited = false;
+
+		// remember the current direction for when we decide to recurse later.
+		self.direction = order[i];
+		
+		switch (order[i])
+		{
+			case 1:	// up
+			default:
+				visited = [self tileInfoForX:x Y:y + 2] & visitedbit;
+				if (y + 2 < self.height)
+				{
+					y1 = y + 1;
+					y2 = y + 2;
+					x1 = x;
+					x2 = x;
+				}
+				break;
+				
+			case 2:	// right
+				visited = [self tileInfoForX:x + 2 Y:y] & visitedbit;
+				if (x + 2 < self.width)
+				{
+					y1 = y;
+					y2 = y;
+					x1 = x + 1;
+					x2 = x + 2;
+				}
+				break;
+				
+			case 3:	// down
+				visited = [self tileInfoForX:x Y:y - 2] & visitedbit;
+				if (y - 2 > 0)
+				{
+					y1 = y - 1;
+					y2 = y - 2;
+					x1 = x;
+					x2 = x;
+				}
+				break;
+				
+			case 4:	// left
+				visited = [self tileInfoForX:x - 2 Y:y] & visitedbit;
+				if (x - 2 < self.width)
+				{
+					y1 = y;
+					y2 = y;
+					x1 = x - 1;
+					x2 = x - 2;
+				}
+				break;
+		}
+		
+		// if we found a valid possible route, within our map bounds, follow it.
+		if (x1 && x2 && y1 && y2)
+		{
+			MapTileType info = [self tileInfoForX:x2 Y:y2];
+			MapTileType info2 = [self tileInfoForX:x1 Y:y1];
+			MapTileType extra = (info & exitbit) | (info2 & exitbit);
+			if (extra)
+				thisPassRetVal = YES;
+			
+			if (!visited)
+			{
+				// follow it as walled and visited, after the recursion it will mark it as free space
+				[self setTileInfo:visitedbit|extra forX:x1 Y:y1];
+				[self setTileInfo:visitedbit|extra forX:x2 Y:y2];
+
+				if ([self iterateCellX:x2 Y:y2] || thisPassRetVal)
+				{
+					thisPassRetVal = YES;
+				}
+				else if (!thisPassRetVal && !extra)
+				{
+					if (self.removeDeadEnds)
+					{
+						[self setTileInfo:wallbit|visitedbit|extra forX:x1 Y:y1];
+						[self setTileInfo:wallbit|visitedbit|extra forX:x2 Y:y2];
+					}
+				}
+			}
+		}
+		
+		if (!retVal)
+			retVal = thisPassRetVal;
+	}
+	
+	return retVal;
+}
+
+
+#pragma mark -
+#pragma mark rooms
+
+
+// place the doors for the rooms.
+//
+- (void) placeDoorsX:(int)x Y:(int)y width:(int)wid height:(int)ht
+{
+	int numDoors = 2;
+	while (randomNum() % 100 < 20)	// add additional doors every 20% that is hit.
+		numDoors++;
+	
+	for (int i = 0; i < numDoors; i++)
+	{
+		int x1, y1, x2, y2;
+		int num = randomNum() % 4 + 1; // 0..3 + 1
+		switch (num)
+		{
+			default:
+			case 1:		// top
+				x1 = x + randomNum() % wid;
+				if (x1 % 2 == 0)	// make sure it's odd so our room doors aren't next to each other ever or they don't go into a "middle" part of a corridor, only the ends.
+					x1--;
+				y1 = y - 1;
+				x2 = x1;
+				y2 = y1 - 1;
+//				NSLog(@"exit type %d, room starting at (%d, %d) (w/h:%d, %d), exit at (%d, %d) and (%d, %d)", num, x, y, wid, ht, x1, y1, x2, y2);
+				break;
+			case 2:		// left
+				x1 = x - 1;
+				y1 = y + randomNum() % ht;
+				if (y1 % 2 == 0)	// make sure it's odd so our room doors aren't next to each other ever or they don't go into a "middle" part of a corridor, only the ends.
+					y1--;
+				x2 = x1 - 1;
+				y2 = y1;
+//				NSLog(@"exit type %d, room starting at (%d, %d) (w/h:%d, %d), exit at (%d, %d) and (%d, %d)", num, x, y, wid, ht, x1, y1, x2, y2);
+				break;
+			case 3:		// bottom
+				x1 = x + randomNum() % wid;
+				if (x1 % 2 == 0)	// make sure it's odd so our room doors aren't next to each other ever or they don't go into a "middle" part of a corridor, only the ends.
+					x1--;
+				y1 = y + ht;
+				x2 = x1;
+				y2 = y1 + 1;
+//				NSLog(@"exit type %d, room starting at (%d, %d) (w/h:%d, %d), exit at (%d, %d) and (%d, %d)", num, x, y, wid, ht, x1, y1, x2, y2);
+				break;
+			case 4:		// right
+				x1 = x + wid;
+				y1 = y + randomNum() % ht;
+				if (y1 % 2 == 0)	// make sure it's odd so our room doors aren't next to each other ever or they don't go into a "middle" part of a corridor, only the ends.
+					y1--;
+				x2 = x1 + 1;
+				y2 = y1;
+//				NSLog(@"exit type %d, room starting at (%d, %d) (w/h:%d, %d), exit at (%d, %d) and (%d, %d)", num, x, y, wid, ht, x1, y1, x2, y2);
+				break;
+		}
+
+		[self setTileInfo:zerobits|exitbit forX:x1 Y:y1];
+		[self setTileInfo:zerobits|exitbit forX:x2 Y:y2];
+	}
+}
+
+
+// how many rooms should we have?
+//
+- (int) roomWeightValue:(int)density
+{
+	// to try and be smart, let's take the number of tiles we have available to us and make average
+	// sized rooms out of them.  Then divide our tile space by the room size to see how many we
+	// on average could fit without corridors.  Then multiply that number by a percentage based
+	// on the density.
+	int retVal = 0;
+	int tilePool = self.width * self.height;
+	int avgRoomSide = (self.roomMaxSize + self.roomMinSize) / 2.0;
+	int avgRoomSize = avgRoomSide * avgRoomSide;
+	int moreAvgRooms = lrint(tilePool / (self.roomMinSize * avgRoomSide));
+	int avgNumRooms = lrint(tilePool / avgRoomSize);
+	
+	switch (density)
+	{
+		case noRooms:
+		default:
+			// 0, set above
+			break;
+			
+		case sparseRooms:
+			retVal = lrint(avgNumRooms * 0.25) + 1;
+			break;
+
+		case someRooms:
+			retVal = lrint(avgNumRooms * 0.5) + 1;
+			break;
+			
+		case averageRooms:
+			retVal = lrint(moreAvgRooms * 0.75) + 1;
+			break;
+			
+		case lotsOfRooms:
+			retVal = moreAvgRooms;
+			break;
+			
+		case veryRoomy:		// as many as will fit?
+			retVal = tilePool / (self.roomMinSize * self.roomMinSize);
+			break;
+	}
+	return retVal;
+}
+
+
+- (int) roomSpacingForDensity:(int)density
+{
+	int roomSpacing = 3;
+	int widerSpacedRooms = 30;
+	int closerSpacedRooms = 15;
+	
+	// room density modification
+	switch (density)
+	{
+		case noRooms:
+		case sparseRooms:
+			widerSpacedRooms = 100;
+			closerSpacedRooms = 0;
+			break;
+			
+		case someRooms:
+			widerSpacedRooms = 75;
+			closerSpacedRooms = 25;
+			break;
+			
+		case averageRooms:
+		default:
+			// set above
+			break;
+			
+		case lotsOfRooms:
+			widerSpacedRooms = 25;
+			closerSpacedRooms = 75;
+			break;
+			
+		case veryRoomy:
+			widerSpacedRooms = 0;
+			closerSpacedRooms = 100;
+			break;
+	}
+		
+	// random room variation spacing
+	if (randomNum() % 100 < widerSpacedRooms)
+		roomSpacing = 5;
+	if (randomNum() % 100 < closerSpacedRooms)
+		roomSpacing = 1;
+	
+	return roomSpacing;
+}
+
+
+// adds rooms given the pre-set inputs.
+//
+- (void) addRooms
+{
+	int roomCount = [self roomWeightValue:self.roomDensity];
+	
+	while (roomCount)
+	{
+		// make a room.
+		int mod = MAX(self.width / 10, self.roomMaxSize);
+		int minRoomLen = self.roomMinSize;
+		int wid = MAX(randomNum() % mod, minRoomLen);
+		int ht = MAX(randomNum() % mod, minRoomLen);
+
+		// less long, more square rooms
+		if (wid * 2 < ht)
+			ht -= wid;
+		else if (ht * 2 < wid)
+			wid -= ht;
+		
+		if (wid % 2 == 0)	// make sure room widths are odd
+			wid++;
+		if (ht % 2 == 0)
+			ht++;
+		
+		// range between 0 + 2 and self.width
+		int maxx = self.width - 4;
+		int maxy = self.height - 4;
+	
+		// if we don't have enough space to place a minimum room then stop
+		if (maxx < wid && maxy < ht)
+			break;
+
+		// figure out where to start building the room
+		int startx, starty;
+		bool valid = true;
+		BOOL tooSmall = NO;
+		do
+		{
+			startx = MAX((randomNum() % maxx), 3);
+			starty = MAX((randomNum() % maxy), 3);
+			if (startx % 2 == 0)	// always make the room start on odd tiles
+				startx--;
+			if (starty % 2 == 0)
+				starty--;
+			
+			// bounds check
+			if (startx + wid + 1 >= maxx ||
+				starty + ht + 1 >= maxy)
+			{
+				valid = false;
+				continue;
+			}
+			
+			// default blocks, chance of 1, 3 or 5 blocks.
+			int roomSpacing = [self roomSpacingForDensity:self.roomDensity];
+			bool roomCollision = false;
+			
+			for (int x = -roomSpacing; x < wid+roomSpacing && !roomCollision; x++)
+			{
+				for (int y = -roomSpacing; y < ht+roomSpacing && !roomCollision; y++)
+				{
+					if ([self tileInfoForX:startx + x Y:starty + y] & roombit)
+						roomCollision = true;
+				}
+			}
+			
+			if (roomCollision)
+				valid = false;
+			else
+				valid = true;
+			
+			// trim the room size a bit to see if we can force a fit.  If it gets to small, abandon the room.
+			if (!valid)
+			{
+				// -2 here for hallway space on each step.  So we don't get doubled-up walls.
+				if ((wid - 2) < minRoomLen && (ht - 2) < minRoomLen)
+					tooSmall = YES;
+				wid = MAX(wid - 2, minRoomLen);
+				ht = MAX(ht - 2, minRoomLen);
+			}
+		} while (!valid && !tooSmall);
+		
+		if (valid)
+		{
+			// place the room
+			for (int x = -1; x < wid + 1; x++)
+			{
+				for (int y = -1; y < ht + 1; y++)
+				{
+					MapTileType info = [self tileInfoForX:startx + x Y:starty + y];
+					
+					if (info & exitbit)	// don't write over the top of doors or entrances
+						continue;
+					
+					// room border
+					if (x == -1 || y == -1 || x == wid || y == ht)
+						[self setTileInfo:wallbit|visitedbit forX:startx + x Y:starty + y];
+						// open up the room!
+					else
+						[self setTileInfo:roombit|visitedbit forX:startx + x Y:starty + y];
+				}
+			}
+			
+			// place the entrances to the room
+			[self placeDoorsX:startx Y:starty width:wid height:ht];
+		}
+		
+		// remove the room space from the pool.
+		roomCount--;
+	}
+}
+
+
+// depth-first search for corridors, after rooms have been placed.
+//
+- (void) setupMapData
+{
+	[self addRooms];
+
+	// recursively build the maze.
+//	[self iterateCellX:1 Y:1];
+
+	// changed this to a loop to get rooms that may have "blank space" on an inside track of rooms.
+	for (int x = 1; x < self.width; x += 2)
+		for (int y = 1; y < self.height; y += 2)
+			[self iterateCellX:x Y:y];
+}
+
+
+#pragma mark -
+#pragma mark END interesting Stuff
+
+
+#pragma mark -
+#pragma mark Accessors
+
+// I hate linear 2d arrays, these are here so I can ignore the math that can be in the way of my thought processes.
+- (void) setTileInfo:(MapTileType)info forX:(int)x Y:(int)y
+{
+	self.mapData[x + (y * self.height)] = info;
+}
+
+- (MapTileType) tileInfoForX:(int)x Y:(int)y
+{
+	MapTileType retVal = self.mapData[x + (y * self.height)];
+	return retVal;
+}
+
+#pragma mark -
+#pragma mark TMXGeneratorDelegate
+
+#define kNumPixelsPerTileSquare	64
+#define kNumPixelsBetweenTiles 2
+#define kMapWidth self.width
+#define kMapHeight self.height
+
+
+- (NSString*) mapFilePath										{ return @"this is an error!"; };
+- (NSString*) tileAtlasForLayerNamed:(NSString*)layerName		{ return @"caveAtlas.png"; }
+
+// basic map setup
+- (NSDictionary*) mapAttributeSetup
+{
+	NSMutableDictionary* dict = [NSMutableDictionary dictionaryWithCapacity:5];
+	[dict setObject:[NSString stringWithFormat:@"%i", kMapWidth] forKey:kTMXGeneratorHeaderInfoMapWidth];
+	[dict setObject:[NSString stringWithFormat:@"%i", kMapHeight] forKey:kTMXGeneratorHeaderInfoMapHeight];
+	[dict setObject:[NSString stringWithFormat:@"%i", kNumPixelsPerTileSquare] forKey:kTMXGeneratorHeaderInfoMapTileWidth];
+	[dict setObject:[NSString stringWithFormat:@"%i", kNumPixelsPerTileSquare] forKey:kTMXGeneratorHeaderInfoMapTileHeight];
+	[dict setObject:[self mapFilePath] forKey:kTMXGeneratorHeaderInfoMapPath];
+	[dict setObject:[NSDictionary dictionaryWithObject:@"Test property" forKey:@"property"] forKey:kTMXGeneratorHeaderInfoMapProperties];
+	return dict;
+}
+
+// set up default tileset
+- (NSDictionary*) tileSetInfoForName:(NSString*)name
+{
+	// we only have one tileset so always return the same thing
+	NSDictionary* dict = [TMXGenerator tileSetWithImage:[self tileAtlasForLayerNamed:name]
+												  named:name
+												  width:kNumPixelsPerTileSquare
+												 height:kNumPixelsPerTileSquare
+											tileSpacing:kNumPixelsBetweenTiles];
+	return dict;
+}
+
+
+- (NSDictionary*) layerInfoForName:(NSString*)name
+{
+	// same for both layers
+	NSDictionary* dict = [TMXGenerator layerNamed:name width:kMapWidth height:kMapHeight data:nil visible:YES];
+	return dict;
+}
+
+
+// determines the initial state of the map
+- (int) tileGIDForLayer:(NSString*)layerName tileSetName:(NSString*)tileSetName X:(int)x Y:(int)y
+{
+	MapTileType info = [self tileInfoForX:x Y:y];
+	int gid = 0;	// default to wall
+	
+	if ((info & wallbit) == zerobits)
+		gid = 1;	// non-wall
+	
+	return gid;
+}
+
+@end
