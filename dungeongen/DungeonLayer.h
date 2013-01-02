@@ -19,15 +19,26 @@
 
 #define MapTileType	short
 
-#define zerobits	0x0000
-#define wallbit		0x1000
-#define doorbit		0x2000
-#define visitedbit	0x4000
-#define exitbit		0x8000
-#define roombit		0x0100
-#define special4	0x0200
-#define special5	0x0400
-#define special6	0x0800
+
+#define kWidthKey			@"width"
+#define kHeightKey			@"height"
+#define kDirectionKey		@"direction"
+#define kRoomMinSizeKey		@"roomMinSize"
+#define kRoomMaxSizeKey		@"roomMaxSize"
+#define kRoomDensityKey		@"roomDensity"
+#define kCorridorType		@"corridorType"
+#define kRemoveDeadEnds		@"removeDeadEnds"
+
+
+#define zerobits			0x0000
+#define wallbit				0x1000
+#define doorbit				0x2000
+#define visitedbit			0x4000
+#define exitbit				0x8000
+#define roombit				0x0100
+#define newDoorBit			0x0200
+#define special5			0x0400
+#define special6			0x0800
 // room for 12 more...
 
 

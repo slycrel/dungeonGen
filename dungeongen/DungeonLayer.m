@@ -89,15 +89,6 @@
 }
 
 
-#define kWidthKey			@"width"
-#define kHeightKey			@"height"
-#define kDirectionKey		@"direction"
-#define kRoomMinSizeKey		@"roomMinSize"
-#define kRoomMaxSizeKey		@"roomMaxSize"
-#define kRoomDensityKey		@"roomDensity"
-#define kCorridorType		@"corridorType"
-#define kRemoveDeadEnds		@"removeDeadEnds"
-
 static long seed = 1010414;
 
 
@@ -134,22 +125,21 @@ static long seed = 1010414;
 		self.removeDeadEnds = [settings integerForKey:kRemoveDeadEnds];
 	}
 	
-//	self.width = 127;
-//	self.height = 127;
-//	self.direction = 1;
-//	self.roomMaxSize = self.width / 8;
-//	self.roomMinSize = 5;
-//	self.roomDensity = averageRooms;
-//	self.corridorType = randomType;
-//	self.removeDeadEnds = YES;
+	self.width = 127;
+	self.height = 127;
+	self.direction = 1;
+	self.roomMaxSize = self.width / 4;
+	self.roomMinSize = 3;
+	self.roomDensity = averageRooms;
+	self.corridorType = bentType;
+	self.removeDeadEnds = NO;
 
 	
 #warning add setting for allowing connecting dead ends to rooms or other corridors.
 
-#warning bug for room placement -- doesn't seem to bounds check correctly on the bottom/left for rooms?  min room size 3 at heavy weight doesn't fill like it should
 #warning bug with non-square maps!  has to do with corridor pathing looks like...
 #warning bug with dead end removal -- it doesn't work quite right.
-#warning bug with maps sized > 127.  Is this a cocos2d bug or TMXGenerator bug?
+#warning bug with maps sized > 127.  Is this a cocos2d 2.0 display bug or TMXGenerator bug?  Initial looking seems to imply TMX generator is fine here.  Bleh.
 	
 	mapData = [self newMapData];
 	
@@ -243,7 +233,7 @@ static long seed = 1010414;
 	int rnd = randomNum() % 100;							// we love percentages!
 
 	// stay straight or go random?
-	if ((self.corridorType == bentType && rnd >= 50) ||		// bent, keep the same starting direction 50% of the time
+	if ((self.corridorType == bentType && rnd >= 65) ||		// bent, keep the same starting direction 65% of the time
 		(self.corridorType == straightType && rnd >= 10))	// straight, keep the same starting direction 90% of the time
 	{
 		if (order[0] != self.direction)
@@ -363,11 +353,11 @@ static long seed = 1010414;
 				[self setTileInfo:visitedbit|extra forX:x1 Y:y1];
 				[self setTileInfo:visitedbit|extra forX:x2 Y:y2];
 
-				if ([self iterateCellX:x2 Y:y2] || thisPassRetVal)
+				if ([self iterateCellX:x2 Y:y2])
 				{
 					thisPassRetVal = YES;
 				}
-				else if (!thisPassRetVal && !extra)
+				else
 				{
 					if (self.removeDeadEnds)
 					{
@@ -566,9 +556,9 @@ static long seed = 1010414;
 		if (ht % 2 == 0)
 			ht++;
 		
-		// range between 0 + 2 and self.width
-		int maxx = self.width - 4;
-		int maxy = self.height - 4;
+		// bounds
+		int maxx = self.width;
+		int maxy = self.height;
 	
 		// if we don't have enough space to place a minimum room then stop
 		if (maxx < wid && maxy < ht)
