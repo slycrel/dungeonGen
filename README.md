@@ -12,9 +12,13 @@ The room code is essentially randomly placed rectangular space throughout the ma
 Some interesting pages where I've gained inspiration and concepts can be found here:
 
 http://donjon.bin.sh/dungeon/about/
+
 http://pcg.wikidot.com
+
 http://weblog.jamisbuck.org/2011/2/7/maze-generation-algorithm-recap
+
 http://www.astrolog.org/labyrnth/algrithm.htm
+
 http://en.wikipedia.org/wiki/Maze_generation_algorithm
 
 I've also done a cave generation project using cellular automata that is fairly straightforward that may be of interest. The concept and some linked python source can be found here:
