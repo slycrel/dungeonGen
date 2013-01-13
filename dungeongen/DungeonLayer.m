@@ -65,13 +65,36 @@
 - (void) doStuff
 {
 	// import map settings
-	[self importSettings];
+	[self importSettings:NO];
 	
 	// set up the data
 	[self setupMapData];
 	
 	// set up the map
 	[self addMap];
+	
+	// add a regen button
+	CCMenuItemFont* item = [CCMenuItemFont itemWithString:@"regenerate" block:^(id sender) {
+		[self.map removeFromParentAndCleanup:YES];
+		[self importSettings:NO];
+		[self setupMapData];
+		[self addMap];
+	}];
+
+	CCMenuItemFont* item2 = [CCMenuItemFont itemWithString:@"randomize settings" block:^(id sender) {
+		[self.map removeFromParentAndCleanup:YES];
+		[self importSettings:YES];
+		[self setupMapData];
+		[self addMap];
+	}];
+
+	CCMenu* menu = [CCMenu menuWithItems:item, item2, nil];
+	[menu alignItemsVerticallyWithPadding:3];
+
+	CGSize size = [[CCDirector sharedDirector] winSize];
+	menu.position = ccp( size.width /2 , size.height/2 );
+	
+	[self addChild:menu];
 }
 
 // alloc memory for our map data array.
@@ -89,63 +112,108 @@
 }
 
 
+#define kWidthKey			@"width"
+#define kHeightKey			@"height"
+#define kDirectionKey		@"direction"
+#define kRoomMinSizeKey		@"roomMinSize"
+#define kRoomMaxSizeKey		@"roomMaxSize"
+#define kRoomDensityKey		@"roomDensity"
+#define kCorridorType		@"corridorType"
+#define kRemoveDeadEnds		@"removeDeadEnds"
+
 static long seed = 1010414;
 
 
 // get the map settings for creation.
-- (void) importSettings
+//
+// **NOTE: map size must be odd for walls to match properly.
+//
+- (void) importSettings:(BOOL)randomSettings
 {
-	// **NOTE: map size must be odd for walls to match properly.
+	// added this so we can call it multiple times with the same random
+	// settings rather than just defaults or totally random
+	static BOOL defaultsSet = NO;
 
-	// load defaults
-	NSUserDefaults* settings = [NSUserDefaults standardUserDefaults];
-	if ([settings integerForKey:kWidthKey] == 0)
+	self.direction = 1;
+
+	if (!randomSettings)
 	{
-		// init defaults
-		[settings setInteger:127 forKey:kWidthKey];
-		[settings setInteger:127 forKey:kHeightKey];
-		[settings setInteger:1 forKey:kDirectionKey];
-		[settings setInteger:5 forKey:kRoomMinSizeKey];
-		[settings setInteger:50 forKey:kRoomMaxSizeKey];
-		[settings setInteger:averageRooms forKey:kRoomDensityKey];
-		[settings setInteger:bentType forKey:kCorridorType];
-		[settings setBool:YES forKey:kRemoveDeadEnds];
-		[settings synchronize];
+		if (!defaultsSet)
+		{
+			// set defaults
+			self.width = 127;
+			self.height = 127;
+			self.roomMinSize = 5;
+			self.roomMaxSize = MAX(MIN(24, self.width / 4), self.roomMinSize);
+			self.roomDensity = lotsOfRooms;
+			self.corridorType = bentType;
+			self.removeDeadEnds = NO;
+			defaultsSet = YES;
+		}
 	}
 	else
 	{
-		// load saved values
-		self.width = [settings integerForKey:kWidthKey];
-		self.height = [settings integerForKey:kHeightKey];
-		self.direction = [settings integerForKey:kDirectionKey];
-		self.roomMaxSize = [settings integerForKey:kRoomMaxSizeKey];
-		self.roomMinSize = [settings integerForKey:kRoomMinSizeKey];
-		self.roomDensity = [settings integerForKey:kRoomDensityKey];
-		self.corridorType = [settings integerForKey:kCorridorType];
-		self.removeDeadEnds = [settings integerForKey:kRemoveDeadEnds];
+		int arbitraryCeiling = lrint(self.width + self.height / 2.0);
+		int mapSize = MAX(25, randomNum() % 127);		// 25..127 map size
+		if (mapSize % 2 == 0)	// make sure the map size is always odd for the right dimensions.
+			mapSize++;
+		self.width = mapSize;
+		self.height = mapSize;
+		self.roomMinSize = MIN(mapSize, MIN(3, randomNum() % arbitraryCeiling));	// 3 up to half width + height of maze
+		if (self.roomMinSize % 2 == 0)
+			self.roomMinSize--;
+		self.roomMaxSize = MIN(mapSize, MAX(self.roomMinSize, randomNum() % arbitraryCeiling));	// min size up to half the maze
+		if (self.roomMaxSize % 2 == 0)
+			self.roomMaxSize++;
+		
+		self.roomDensity = randomNum() % 6;				// 0..5 to map to enum
+		self.corridorType = randomNum() % 3;			// 0..2 to map to enum
+		self.removeDeadEnds = PercentChance(50);
+		
+		// can't remove dead ends if no rooms (the whole maze is a dead end!)
+		if (self.roomDensity == noRooms)
+			self.removeDeadEnds = NO;
 	}
 	
-	self.width = 127;
-	self.height = 127;
-	self.direction = 1;
-	self.roomMaxSize = self.width / 4;
-	self.roomMinSize = 3;
-	self.roomDensity = averageRooms;
-	self.corridorType = bentType;
-	self.removeDeadEnds = NO;
+//	// load saved values from disk
+//	NSUserDefaults* settings = [NSUserDefaults standardUserDefaults];
+//	if ([settings integerForKey:kWidthKey] != 0)
+//	{
+//		// load saved values
+//		self.width = [settings integerForKey:kWidthKey];
+//		self.height = [settings integerForKey:kHeightKey];
+//		self.direction = [settings integerForKey:kDirectionKey];
+//		self.roomMaxSize = [settings integerForKey:kRoomMaxSizeKey];
+//		self.roomMinSize = [settings integerForKey:kRoomMinSizeKey];
+//		self.roomDensity = [settings integerForKey:kRoomDensityKey];
+//		self.corridorType = [settings integerForKey:kCorridorType];
+//		self.removeDeadEnds = [settings integerForKey:kRemoveDeadEnds];
+//	}
+//
+//	// save the new defaults
+//	[settings setInteger:self.width forKey:kWidthKey];
+//	[settings setInteger:self.height forKey:kHeightKey];
+//	[settings setInteger:self.direction forKey:kDirectionKey];
+//	[settings setInteger:self.roomMinSize forKey:kRoomMinSizeKey];
+//	[settings setInteger:self.roomMaxSize forKey:kRoomMaxSizeKey];
+//	[settings setInteger:self.roomDensity forKey:kRoomDensityKey];
+//	[settings setInteger:self.corridorType forKey:kCorridorType];
+//	[settings setBool:self.removeDeadEnds forKey:kRemoveDeadEnds];
+//	[settings synchronize];
 
-	
 #warning add setting for allowing connecting dead ends to rooms or other corridors.
-
+	
+#warning bug for room placement -- doesn't seem to bounds check correctly on the bottom/left for rooms?  min room size 3 at heavy weight doesn't fill like it should
 #warning bug with non-square maps!  has to do with corridor pathing looks like...
 #warning bug with dead end removal -- it doesn't work quite right.
-#warning bug with maps sized > 127.  Is this a cocos2d 2.0 display bug or TMXGenerator bug?  Initial looking seems to imply TMX generator is fine here.  Bleh.
+#warning bug with maps sized > 127.  Is this a cocos2d bug or TMXGenerator bug?
 	
+	// to keep generating the same map set the seed to whatever default you'd like.
+	init_gen_rand(seed);
+	seed = [[NSDate date] timeIntervalSince1970];
+
 	mapData = [self newMapData];
 	
-	// random number generator
-	init_gen_rand(seed);
-	seed = randomNum();
 }
 
 
@@ -233,7 +301,7 @@ static long seed = 1010414;
 	int rnd = randomNum() % 100;							// we love percentages!
 
 	// stay straight or go random?
-	if ((self.corridorType == bentType && rnd >= 65) ||		// bent, keep the same starting direction 65% of the time
+	if ((self.corridorType == bentType && rnd >= 50) ||		// bent, keep the same starting direction 50% of the time
 		(self.corridorType == straightType && rnd >= 10))	// straight, keep the same starting direction 90% of the time
 	{
 		if (order[0] != self.direction)
@@ -353,11 +421,11 @@ static long seed = 1010414;
 				[self setTileInfo:visitedbit|extra forX:x1 Y:y1];
 				[self setTileInfo:visitedbit|extra forX:x2 Y:y2];
 
-				if ([self iterateCellX:x2 Y:y2])
+				if ([self iterateCellX:x2 Y:y2] || thisPassRetVal)
 				{
 					thisPassRetVal = YES;
 				}
-				else
+				else if (!thisPassRetVal && !extra)
 				{
 					if (self.removeDeadEnds)
 					{
@@ -376,8 +444,66 @@ static long seed = 1010414;
 }
 
 
+BOOL PercentChance(int upToPercent)
+{
+	if ( (randomNum() % 100) < upToPercent)
+		return YES;
+	return NO;
+}
+
+
 #pragma mark -
 #pragma mark rooms
+
+
+// return NO if a door is not yet in the requested wall -OR- if all sides have doors.
+- (BOOL) doorInThisWall:(long*)doorVal whichWall:(int)whichWall update:(BOOL)updateDoorVal
+{
+	BOOL retVal = NO;
+	
+	long top = 0x0001;
+	long left = 0x0010;
+	long bottom = 0x0100;
+	long right = 0x1000;
+	long allWalls = top | left | bottom | right;
+	long setVal = 0;
+	
+	switch (whichWall)
+	{
+		default:
+		case 1:
+			if (*doorVal & top)
+				retVal = YES;
+			setVal = top;
+			break;
+			
+		case 2:
+			if (*doorVal & left)
+				retVal = YES;
+			setVal = left;
+			break;
+			
+		case 3:
+			if (*doorVal & bottom)
+				retVal = YES;
+			setVal = bottom;
+			break;
+			
+		case 4:
+			if (*doorVal & right)
+				retVal = YES;
+			setVal = right;
+			break;
+	}
+
+	*doorVal |= setVal;
+	
+	// if all walls have a door in them then return NO so that this wall is available for an additional door.
+	if (*doorVal & allWalls)
+		retVal = NO;
+	
+	return retVal;
+}
 
 
 // place the doors for the rooms.
@@ -385,13 +511,37 @@ static long seed = 1010414;
 - (void) placeDoorsX:(int)x Y:(int)y width:(int)wid height:(int)ht
 {
 	int numDoors = 2;
-	while (randomNum() % 100 < 20)	// add additional doors every 20% that is hit.
+	int dwindlingPercent = 50;
+	while (PercentChance(dwindlingPercent))	// add additional doors every 20% that is hit.
+	{
 		numDoors++;
+		dwindlingPercent = lrint(dwindlingPercent / 2.0);	// reduce the chance by half for additional doors.
+	}
 	
-	for (int i = 0; i < numDoors; i++)
+	// do a little manual correction.  For large rooms, make sure we have 3 to 6 doors
+//	int avgRoomSide = (self.roomMaxSize + self.roomMinSize) / 2.0;
+//	if (wid + ht >= avgRoomSide)
+//		numDoors += 1;
+//	if (wid + ht >= lrint(avgRoomSide * 1.5))
+//		numDoors += 1;
+
+	numDoors = 4;
+	long visited = 0;
+	
+	while (numDoors)
 	{
 		int x1, y1, x2, y2;
 		int num = randomNum() % 4 + 1; // 0..3 + 1
+
+		// each door should (usually) be on a different wall
+		if ([self doorInThisWall:&visited whichWall:num update:YES])// &&
+//			PercentChance(80))
+		{
+			continue;
+		}
+		
+		numDoors--;
+		
 		switch (num)
 		{
 			default:
@@ -522,9 +672,9 @@ static long seed = 1010414;
 	}
 		
 	// random room variation spacing
-	if (randomNum() % 100 < widerSpacedRooms)
+	if (PercentChance(widerSpacedRooms))
 		roomSpacing = 5;
-	if (randomNum() % 100 < closerSpacedRooms)
+	if (PercentChance(closerSpacedRooms))
 		roomSpacing = 1;
 	
 	return roomSpacing;
@@ -556,15 +706,16 @@ static long seed = 1010414;
 		if (ht % 2 == 0)
 			ht++;
 		
-		// bounds
-		int maxx = self.width;
-		int maxy = self.height;
+		// range between 0 + 2 and self.width
+		int maxx = self.width - 4;
+		int maxy = self.height - 4;
 	
 		// if we don't have enough space to place a minimum room then stop
 		if (maxx < wid && maxy < ht)
 			break;
 
 		// figure out where to start building the room
+		int attempts = 200;		// max attempts for a room.
 		int startx, starty;
 		bool valid = true;
 		BOOL tooSmall = NO;
@@ -589,9 +740,9 @@ static long seed = 1010414;
 			int roomSpacing = [self roomSpacingForDensity:self.roomDensity];
 			bool roomCollision = false;
 			
-			for (int x = -roomSpacing; x < wid+roomSpacing && !roomCollision; x++)
+			for (int x = -MIN(roomSpacing, startx); x < wid+roomSpacing && !roomCollision; x++)
 			{
-				for (int y = -roomSpacing; y < ht+roomSpacing && !roomCollision; y++)
+				for (int y = -MIN(roomSpacing, starty); y < ht+roomSpacing && !roomCollision; y++)
 				{
 					if ([self tileInfoForX:startx + x Y:starty + y] & roombit)
 						roomCollision = true;
@@ -612,7 +763,7 @@ static long seed = 1010414;
 				wid = MAX(wid - 2, minRoomLen);
 				ht = MAX(ht - 2, minRoomLen);
 			}
-		} while (!valid && !tooSmall);
+		} while (!valid && !tooSmall && --attempts > 0);
 		
 		if (valid)
 		{
